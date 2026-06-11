@@ -122,7 +122,7 @@ def _retornar_df_vazio(index: pd.Index, gl: int) -> pd.DataFrame:
         "D2": np.nan, "gl": gl, "pvalor": np.nan, "outlier": False
     }, index=index)
 
-def imputar_pela_media(df: pd.DataFrame, colunas: List[str]) -> pd.DataFrame:
+def substituir_pela_media_hbat_missing(df: pd.DataFrame, colunas: List[str]) -> pd.DataFrame:
     """Imputa valores ausentes pela média da coluna."""
     df_imputado = df.copy()
     for coluna in colunas:
@@ -201,8 +201,10 @@ def preparar_contexto_hatco(df: pd.DataFrame) -> Dict[str, Any]:
     
     # 1. Mapeamento de colunas (Evita loops repetitivos e melhora a leitura)
     mapa_cols = _mapear_nomes_colunas(df)
+
     variaveis_escalares_hatco = ['x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x9', 'x10']
     colunas_escalares = [mapa_cols[c] for c in variaveis_escalares_hatco if c in mapa_cols]
+    
     colunas_uni = [mapa_cols[c] for c in ['x1', 'x2', 'x5'] if c in mapa_cols]
     coluna_x, coluna_y = mapa_cols.get('x1'), mapa_cols.get('x2')
     colunas_maha = sorted(colunas_escalares)
@@ -239,22 +241,13 @@ def preparar_contexto_hatco(df: pd.DataFrame) -> Dict[str, Any]:
         "n_purificado": len(df_sem_outliers)
     }
 
-def _filtrar_colunas_criticas_hbat(df: pd.DataFrame) -> List[str]:
-    """Filtra colunas numéricas com dados ausentes que sejam menores que V10 (excluindo ID)."""
-    colunas_validas = []
-    for col in colunas_numericas(df):
-        nome_limpo = col.lower()
-        if nome_limpo != 'id' and nome_limpo.startswith('v'):
-            try:
-                # Extrai o número da variável (ex: 'v8' -> 8)
-                numero_v = int(nome_limpo.replace('v', ''))
-                if numero_v < 10 and df[col].isnull().any():
-                    colunas_validas.append(col)
-            except ValueError:
-                continue
-    return colunas_validas
+def detecta_celulas_em_branco(df: pd.DataFrame) -> List[str]:
+    """Filtra as variáveis escalares (v1 a v9) que possuem dados ausentes."""
+    escalares = [f"v{i}" for i in range(1, 10)]
+    # Retorna apenas as colunas da lista que existem no banco e têm nulos
+    return [col for col in escalares if col in df.columns and df[col].isnull().any()]
 
-def preparar_contexto_hbat(df: pd.DataFrame) -> Dict[str, Any]:
+def preparar_contexto_hbat_missing(df: pd.DataFrame) -> Dict[str, Any]:
     """Analisa dados ausentes e aplica imputação pela média na base HBAT."""
     total_casos = len(df)
     
@@ -263,10 +256,10 @@ def preparar_contexto_hbat(df: pd.DataFrame) -> Dict[str, Any]:
     percentual_ausentes = (df.isnull().mean() * 100).round(2) # Mais direto que dividir manualmente
 
     # 2. Filtro de regras específicas (Isolado em função externa para clareza)
-    colunas_com_ausente = _filtrar_colunas_criticas_hbat(df)
+    colunas_com_ausente = detecta_celulas_em_branco(df)
 
-    # 3. Imputação
-    df_imputado = imputar_pela_media(df, colunas_com_ausente)
+    # 3. Substituição de células em branco pela média
+    df_imputado = substituir_pela_media_hbat_missing(df, colunas_com_ausente)
 
     # 4. Construção da tabela de resumo de forma pythônica
     tabela_missing = pd.DataFrame({
@@ -294,7 +287,7 @@ def gerar_relatorio():
     df_hbat = carregar_csv(ARQUIVO_HBAT)
 
     ctx_hatco = preparar_contexto_hatco(df_hatco)
-    ctx_hbat = preparar_contexto_hbat(df_hbat)
+    ctx_hbat = preparar_contexto_hbat_missing(df_hbat)
 
     # Geração dos gráficos
     gerar_boxplot(df_hatco, ctx_hatco["colunas_uni"])
