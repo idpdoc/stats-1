@@ -8,7 +8,7 @@ Saída: relatorio_analise.html + Gráficos no Padrão Estatístico SPSS
 
 __author__ = "Marcos Cícero"
 __license__ = "MIT"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __maintainer__ = "Marcos Cícero"
 
 import datetime
@@ -25,45 +25,35 @@ warnings.filterwarnings("ignore")
 
 # ── Configurações ─────────────────────────────────────────────────────────────
 
-# Caminhos e Nomes de Arquivos
-ARQUIVO_HATCO = "HATCO.csv"         # Base de dados para análise de outliers
-ARQUIVO_HBAT = "HBAT_MISSING.csv"   # Base de dados com dados ausentes
-ARQUIVO_HTML = "relatorio_analise.html"  # Relatório final formatado
+ARQUIVO_HATCO = "HATCO.csv"
+ARQUIVO_HBAT = "HBAT_MISSING.csv"
+ARQUIVO_HTML = "relatorio_analise.html"
 
-# Limiares Estatísticos para Detecção de Outliers
-LIMIAR_ZSCORE = 2.5       # Desvios-padrão (limiar univariado e bivariado)
-LIMIAR_PVALOR_CHI2 = 0.001  # Limite Chi-Quadrado para Mahalanobis (multivariado)
+LIMIAR_ZSCORE = 2.5
+LIMIAR_PVALOR_CHI2 = 0.001
 
 # ── Utilitários ───────────────────────────────────────────────────────────────
 
 def carregar_csv(caminho: str) -> pd.DataFrame:
-    """Carrega um arquivo CSV."""
     return pd.read_csv(caminho, sep=",")
 
 def colunas_numericas(df: pd.DataFrame) -> List[str]:
-    """Retorna as colunas numéricas do DataFrame."""
     return df.select_dtypes(include=[np.number]).columns.tolist()
 
 # ── Lógica Estatística ────────────────────────────────────────────────────────
 
 def detectar_outliers_univariados(df: pd.DataFrame, colunas: List[str]) -> Dict[str, list]:
-    """Detecta outliers univariados usando Z-score de forma vetorizada."""
     resultado = {}
-    
     for coluna in colunas:
         z_scores = stats.zscore(df[coluna], nan_policy='omit')
         outliers_idx = df.index[abs(z_scores) > LIMIAR_ZSCORE]
         resultado[coluna] = outliers_idx.tolist()
-        
     return resultado
 
 def detectar_outliers_bivariados(df: pd.DataFrame, col_x: str, col_y: str) -> pd.DataFrame:
-    """Detecta outliers bivariados através do Z-score dos resíduos da regressão."""
     dados = df[[col_x, col_y]].dropna()
-    
     try:
         slope, intercept, *_ = stats.linregress(dados[col_x], dados[col_y])
-        
         valores_previstos = intercept + slope * dados[col_x]
         residuos = dados[col_y] - valores_previstos
         z_residuos = stats.zscore(residuos)
@@ -71,22 +61,18 @@ def detectar_outliers_bivariados(df: pd.DataFrame, col_x: str, col_y: str) -> pd
         is_outlier = abs(z_residuos) > LIMIAR_ZSCORE
         outliers = dados[is_outlier].copy()
         outliers["residuo_padronizado"] = z_residuos[is_outlier].round(4)
-        
         return outliers
     except ValueError:
         return pd.DataFrame()
 
 def calcular_mahalanobis(df: pd.DataFrame, colunas: List[str]) -> pd.DataFrame:
-    """Calcula a distância de Mahalanobis de forma vetorizada e identifica outliers."""
     dados = df[colunas].dropna()
     gl = len(colunas)
-    
     if len(dados) <= gl:
         return _retornar_df_vazio(df.index, gl)
     
     dados_centralizados = dados - dados.mean()
     cov_mat = np.cov(dados.values.T)
-    
     try:
         inv_cov_mat = np.linalg.pinv(cov_mat)
         d2 = np.sum(dados_centralizados.values @ inv_cov_mat * dados_centralizados.values, axis=1)
@@ -94,24 +80,15 @@ def calcular_mahalanobis(df: pd.DataFrame, colunas: List[str]) -> pd.DataFrame:
         return _retornar_df_vazio(df.index, gl)
     
     pvalor = 1 - stats.chi2.cdf(d2, df=gl)
-    
     resultado_parcial = pd.DataFrame({
-        "D2": d2,
-        "gl": gl,
-        "pvalor": pvalor,
-        "outlier": pvalor < LIMIAR_PVALOR_CHI2
+        "D2": d2, "gl": gl, "pvalor": pvalor, "outlier": pvalor < LIMIAR_PVALOR_CHI2
     }, index=dados.index)
-    
     return resultado_parcial.reindex(df.index).fillna({"outlier": False})
 
 def _retornar_df_vazio(index: pd.Index, gl: int) -> pd.DataFrame:
-    """Função auxiliar para manter o código limpo ao retornar estrutura padrão."""
-    return pd.DataFrame({
-        "D2": np.nan, "gl": gl, "pvalor": np.nan, "outlier": False
-    }, index=index)
+    return pd.DataFrame({"D2": np.nan, "gl": gl, "pvalor": np.nan, "outlier": False}, index=index)
 
 def substituir_pela_media_hbat_missing(df: pd.DataFrame, colunas: List[str]) -> pd.DataFrame:
-    """Imputa valores ausentes pela média da coluna."""
     df_imputado = df.copy()
     for coluna in colunas:
         if df_imputado[coluna].isnull().any():
@@ -181,13 +158,10 @@ def gerar_grafico_missing(percentual_ausentes: pd.Series):
 # ── Preparação de Dados para Template ───────────────────────────────────────
 
 def _mapear_nomes_colunas(df: pd.DataFrame) -> Dict[str, str]:
-    """Cria um dicionário para traduzir nomes case-insensitive para o nome real no DF."""
     return {col.lower(): col for col in df.columns}
 
 def preparar_contexto_hatco(df: pd.DataFrame) -> Dict[str, Any]:
-    """Executa o pipeline completo de detecção e remoção de outliers para a base HATCO."""
     mapa_cols = _mapear_nomes_colunas(df)
-
     variaveis_escalares_hatco = ['x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x9', 'x10']
     colunas_escalares = [mapa_cols[c] for c in variaveis_escalares_hatco if c in mapa_cols]
     
@@ -208,6 +182,18 @@ def preparar_contexto_hatco(df: pd.DataFrame) -> Dict[str, Any]:
 
     df_sem_outliers = df.drop(index=indices_flagados, errors="ignore")
 
+    # Comparação Média e Mediana (Com e Sem Outliers)
+    comparacao_hatco = []
+    for col in colunas_escalares:
+        comparacao_hatco.append({
+            "variavel": col,
+            "media_original": df[col].mean(),
+            "mediana_original": df[col].median(),
+            "media_purificada": df_sem_outliers[col].mean() if col in df_sem_outliers.columns else np.nan,
+            "mediana_purificada": df_sem_outliers[col].median() if col in df_sem_outliers.columns else np.nan,
+        })
+    df_comparacao_hatco = pd.DataFrame(comparacao_hatco)
+
     return {
         "colunas_uni": colunas_uni,
         "coluna_x": coluna_x,
@@ -220,19 +206,17 @@ def preparar_contexto_hatco(df: pd.DataFrame) -> Dict[str, Any]:
         "maha_out": maha_out,
         "indices_flagados": indices_flagados,
         "df_sem_outliers": df_sem_outliers,
+        "df_comparacao_hatco": df_comparacao_hatco,
         "n_original": len(df),
         "n_purificado": len(df_sem_outliers)
     }
 
 def detecta_celulas_em_branco(df: pd.DataFrame) -> List[str]:
-    """Filtra as variáveis escalares (v1 a v9) que possuem dados ausentes."""
     escalares = [f"v{i}" for i in range(1, 10)]
     return [col for col in escalares if col in df.columns and df[col].isnull().any()]
 
 def preparar_contexto_hbat_missing(df: pd.DataFrame) -> Dict[str, Any]:
-    """Analisa dados ausentes e aplica imputação pela média na base HBAT."""
     total_casos = len(df)
-    
     contagem_ausentes = df.isnull().sum()
     percentual_ausentes = (df.isnull().mean() * 100).round(2)
 
@@ -244,8 +228,19 @@ def preparar_contexto_hbat_missing(df: pd.DataFrame) -> Dict[str, Any]:
         "pct": percentual_ausentes,
         "n_valido": total_casos - contagem_ausentes
     }).rename_axis("variavel").reset_index()
-    
     tabela_missing = tabela_missing.sort_values("pct", ascending=False)
+
+    # Comparação Média e Mediana (Antes e Depois da Imputação)
+    comparacao_hbat = []
+    for col in colunas_com_ausente:
+        comparacao_hbat.append({
+            "variavel": col,
+            "media_original": df[col].mean(), # Ignora NaN nativamente
+            "mediana_original": df[col].median(),
+            "media_imputada": df_imputado[col].mean(),
+            "mediana_imputada": df_imputado[col].median(),
+        })
+    df_comparacao_hbat = pd.DataFrame(comparacao_hbat)
 
     return {
         "total_casos": total_casos,
@@ -253,13 +248,13 @@ def preparar_contexto_hbat_missing(df: pd.DataFrame) -> Dict[str, Any]:
         "percentual_ausentes": percentual_ausentes,
         "colunas_com_ausente": colunas_com_ausente,
         "df_imputado": df_imputado,
-        "tabela_missing": tabela_missing
+        "tabela_missing": tabela_missing,
+        "df_comparacao_hbat": df_comparacao_hbat
     }
 
 # ── Renderização com Jinja2 ───────────────────────────────────────────────────
 
 def gerar_relatorio():
-    """Função principal que gera os gráficos e o relatório HTML."""
     try:
         df_hatco = carregar_csv(ARQUIVO_HATCO)
         df_hbat = carregar_csv(ARQUIVO_HBAT)
@@ -270,13 +265,11 @@ def gerar_relatorio():
     ctx_hatco = preparar_contexto_hatco(df_hatco)
     ctx_hbat = preparar_contexto_hbat_missing(df_hbat)
 
-    # Geração dos gráficos
     gerar_boxplot(df_hatco, ctx_hatco["colunas_uni"])
     gerar_dispersao(df_hatco, ctx_hatco["coluna_x"], ctx_hatco["coluna_y"])
     gerar_qq_mahalanobis(ctx_hatco["maha"], ctx_hatco["colunas_maha"])
     gerar_grafico_missing(ctx_hbat["percentual_ausentes"])
 
-    # Consolidação do dicionário de contexto para o Jinja2
     contexto = {
         "titulo": "Diagnóstico Multivariado de Dados — Padrão SPSS",
         "limiar_zscore": LIMIAR_ZSCORE,
@@ -288,7 +281,6 @@ def gerar_relatorio():
         **ctx_hbat
     }
 
-    # Inicialização do ambiente Jinja2 e gravação da saída
     try:
         env = Environment(loader=FileSystemLoader('.'), autoescape=True)
         template = env.get_template('template_relatorio.html')
