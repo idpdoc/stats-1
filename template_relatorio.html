@@ -13,6 +13,7 @@
         .alerta { color: #8B0000; font-weight: bold; }
         img { max-width: 100%; height: auto; border: 1px solid #ddd; margin: 15px 0; }
         hr { border: 1px solid #ddd; margin: 25px 0; }
+        .interpretacao { background-color: #f9f9f9; border-left: 4px solid #1B365D; padding: 15px; margin: 20px 0; }
     </style>
 </head>
 <body>
@@ -84,14 +85,49 @@
 
 <p><strong>Observação:</strong> Apenas os casos com p &lt; 0.001 foram marcados como outliers multivariados.</p>
 
-<h3>4. Comparação COM × SEM Outliers</h3>
+<div class="interpretacao">
+    <h4>Interpretação dos Outliers Identificados:</h4>
+    <p>[Inserir aqui a interpretação qualitativa dos resultados univariados, bivariados e multivariados. Exemplo: "Identificamos X outliers univariados na variável... O gráfico de dispersão revelou... A distância de Mahalanobis sinalizou o caso Y com comportamento divergente global..."]</p>
+</div>
+
+<h3>4. Comparação COM × SEM Outliers (Estatísticas Descritivas)</h3>
 <p><strong>Original:</strong> {{ n_original }} casos | 
    <strong>Removidos:</strong> {{ indices_flagados|length }} | 
    <strong>Purificada:</strong> {{ n_purificado }} casos</p>
 
+<table>
+    <thead>
+        <tr>
+            <th>Variável Escalar</th>
+            <th>Média (Com Outliers)</th>
+            <th>Média (Sem Outliers)</th>
+            <th>Mediana (Com Outliers)</th>
+            <th>Mediana (Sem Outliers)</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for _, row in df_comparacao_hatco.iterrows() %}
+        <tr>
+            <td><strong>{{ row.variavel }}</strong></td>
+            <td>{{ row.media_original | round(4) }}</td>
+            <td>{{ row.media_purificada | round(4) }}</td>
+            <td>{{ row.mediana_original | round(4) }}</td>
+            <td>{{ row.mediana_purificada | round(4) }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<div class="interpretacao">
+    <h4>Impacto da Remoção de Outliers:</h4>
+    <p>[Descrever o que mudou. Exemplo: "Observa-se que a média da variável X sofreu um ajuste de Y% após a purificação, indicando que a média original estava sendo repuxada por valores extremos. A mediana demonstrou-se mais robusta, mantendo-se relativamente estável em ambos os cenários..."]</p>
+</div>
+
 <hr>
 
 <h2>BLOCO HBAT_MISSING — Dados Ausentes</h2>
+
+<h3>1. Análise de Omissões</h3>
 <img src="missing_spss.png" alt="Missing">
 
 <table>
@@ -107,6 +143,36 @@
     {% endfor %}
     </tbody>
 </table>
+
+<h3>2. Estimação e Substituição pela Média</h3>
+
+<table>
+    <thead>
+        <tr>
+            <th>Variável Escalar</th>
+            <th>Média (Antes)</th>
+            <th>Média (Depois)</th>
+            <th>Mediana (Antes)</th>
+            <th>Mediana (Depois)</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for _, row in df_comparacao_hbat.iterrows() %}
+        <tr>
+            <td><strong>{{ row.variavel }}</strong></td>
+            <td>{{ row.media_original | round(4) }}</td>
+            <td>{{ row.media_imputada | round(4) }}</td>
+            <td>{{ row.mediana_original | round(4) }}</td>
+            <td>{{ row.mediana_imputada | round(4) }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<div class="interpretacao">
+    <h4>Impacto das Substituições:</h4>
+    <p>[Relatar o impacto empírico. Exemplo: "A substituição dos dados ausentes pela média resultou, previsivelmente, na manutenção exata dos valores das médias para todas as variáveis imputadas. No entanto, houve um leve deslocamento nas medianas da variável Z, e a variância amostral global tende a ser reduzida de forma artificial por este método de imputação univariado..."]</p>
+</div>
 
 <hr>
 <p><small>Relatório gerado com Python + Jinja2</small></p>
