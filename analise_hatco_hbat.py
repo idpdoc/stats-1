@@ -1,29 +1,38 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
 Análise de Outliers e Dados Ausentes — HATCO / HBAT_MISSING
 Saída: relatorio_analise.html + Gráficos no Padrão Estatístico SPSS
 """
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy import stats
-from typing import List, Dict, Any
+__author__ = "Marcos Cícero"
+__license__ = "MIT"
+__version__ = "1.0.0"
+__maintainer__ = "Marcos Cícero"
+
 import datetime
+from typing import Any, Dict, List
 import warnings
+
 from jinja2 import Environment, FileSystemLoader
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy import stats
 
 warnings.filterwarnings("ignore")
 
 # ── Configurações ─────────────────────────────────────────────────────────────
 
 # Caminhos e Nomes de Arquivos
-ARQUIVO_HATCO         = "HATCO.csv"               # Base de dados principal da HATCO (geralmente usada para análise de outliers)
-ARQUIVO_HBAT          = "HBAT_MISSING.csv"        # Base de dados da HBAT que contém dados ausentes (foco em imputação)
-ARQUIVO_HTML          = "relatorio_analise.html"  # Arquivo de saída onde será gerado o relatório final formatado
+ARQUIVO_HATCO = "HATCO.csv"         # Base de dados para análise de outliers
+ARQUIVO_HBAT = "HBAT_MISSING.csv"   # Base de dados com dados ausentes
+ARQUIVO_HTML = "relatorio_analise.html"  # Relatório final formatado
 
 # Limiares Estatísticos para Detecção de Outliers
-LIMIAR_ZSCORE         = 2.5    # Desvios-padrão da média; valores acima disso são considerados outliers (univariados/bivariados)
-LIMIAR_PVALOR_CHI2    = 0.001  # Probabilidade limite na curva Chi-Quadrado; abaixo disso, o ponto é um outlier multivariado (Mahalanobis)  
+LIMIAR_ZSCORE = 2.5       # Desvios-padrão (limiar univariado e bivariado)
+LIMIAR_PVALOR_CHI2 = 0.001  # Limite Chi-Quadrado para Mahalanobis (multivariado)
 
 # ── Utilitários ───────────────────────────────────────────────────────────────
 
@@ -42,11 +51,7 @@ def detectar_outliers_univariados(df: pd.DataFrame, colunas: List[str]) -> Dict[
     resultado = {}
     
     for coluna in colunas:
-        # O scipy.stats.zscore aceita um parâmetro nan_policy='omit'
-        # Isso evita termos que dropar os NaNs manualmente antes do cálculo
         z_scores = stats.zscore(df[coluna], nan_policy='omit')
-        
-        # Filtramos o index onde o valor absoluto do z-score supera o limiar
         outliers_idx = df.index[abs(z_scores) > LIMIAR_ZSCORE]
         resultado[coluna] = outliers_idx.tolist()
         
@@ -56,24 +61,19 @@ def detectar_outliers_bivariados(df: pd.DataFrame, col_x: str, col_y: str) -> pd
     """Detecta outliers bivariados através do Z-score dos resíduos da regressão."""
     dados = df[[col_x, col_y]].dropna()
     
-    # Se não houver variação ou dados suficientes, stats.linregress já lida bem
-    # ou podemos capturar de forma limpa.
     try:
         slope, intercept, *_ = stats.linregress(dados[col_x], dados[col_y])
         
-        # O cálculo do resíduo e seu z-score pode usar a mesma lógica univariada
         valores_previstos = intercept + slope * dados[col_x]
         residuos = dados[col_y] - valores_previstos
         z_residuos = stats.zscore(residuos)
         
-        # Filtrando e construindo o DataFrame de retorno de forma direta
         is_outlier = abs(z_residuos) > LIMIAR_ZSCORE
         outliers = dados[is_outlier].copy()
         outliers["residuo_padronizado"] = z_residuos[is_outlier].round(4)
         
         return outliers
     except ValueError:
-        # Caso falte dados ou variância para a regressão
         return pd.DataFrame()
 
 def calcular_mahalanobis(df: pd.DataFrame, colunas: List[str]) -> pd.DataFrame:
@@ -81,30 +81,20 @@ def calcular_mahalanobis(df: pd.DataFrame, colunas: List[str]) -> pd.DataFrame:
     dados = df[colunas].dropna()
     gl = len(colunas)
     
-    # 1. Validação inicial: precisamos de mais pontos que variáveis
     if len(dados) <= gl:
         return _retornar_df_vazio(df.index, gl)
     
-    # 2. Centralização dos dados (X - Média)
     dados_centralizados = dados - dados.mean()
     cov_mat = np.cov(dados.values.T)
     
     try:
-        # Usa pseudo-inversa (pinv) direto: ela é estável e já lida com matrizes 
-        # quase singulares (multicolinearidade) sem precisar do truque do np.eye
         inv_cov_mat = np.linalg.pinv(cov_mat)
-        
-        # 3. Cálculo vetorizado de Mahalanobis: D² = diag(X_cent . Inv_Cov . X_cent.T)
-        # é infinitamente mais rápido
         d2 = np.sum(dados_centralizados.values @ inv_cov_mat * dados_centralizados.values, axis=1)
-        
     except (np.linalg.LinAlgError, ValueError):
         return _retornar_df_vazio(df.index, gl)
     
-    # 4. Cálculo Estatístico (Chi-Quadrado)
     pvalor = 1 - stats.chi2.cdf(d2, df=gl)
     
-    # 5. Construção do resultado alinhado ao DF original
     resultado_parcial = pd.DataFrame({
         "D2": d2,
         "gl": gl,
@@ -112,9 +102,7 @@ def calcular_mahalanobis(df: pd.DataFrame, colunas: List[str]) -> pd.DataFrame:
         "outlier": pvalor < LIMIAR_PVALOR_CHI2
     }, index=dados.index)
     
-    # Reindex traz de volta as linhas com NaN do DF original preenchendo os padrões
     return resultado_parcial.reindex(df.index).fillna({"outlier": False})
-
 
 def _retornar_df_vazio(index: pd.Index, gl: int) -> pd.DataFrame:
     """Função auxiliar para manter o código limpo ao retornar estrutura padrão."""
@@ -198,8 +186,6 @@ def _mapear_nomes_colunas(df: pd.DataFrame) -> Dict[str, str]:
 
 def preparar_contexto_hatco(df: pd.DataFrame) -> Dict[str, Any]:
     """Executa o pipeline completo de detecção e remoção de outliers para a base HATCO."""
-    
-    # 1. Mapeamento de colunas (Evita loops repetitivos e melhora a leitura)
     mapa_cols = _mapear_nomes_colunas(df)
 
     variaveis_escalares_hatco = ['x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x9', 'x10']
@@ -209,20 +195,17 @@ def preparar_contexto_hatco(df: pd.DataFrame) -> Dict[str, Any]:
     coluna_x, coluna_y = mapa_cols.get('x1'), mapa_cols.get('x2')
     colunas_maha = sorted(colunas_escalares)
 
-    # 2. Execução das análises
     outliers_uni = detectar_outliers_univariados(df, colunas_uni)
     outliers_biv = detectar_outliers_bivariados(df, coluna_x, coluna_y)
     maha = calcular_mahalanobis(df, colunas_maha)
-    maha_out = maha[maha["outlier"]] # Filtro booleano direto
+    maha_out = maha[maha["outlier"]]
 
-    # 3. Consolidação dos índices de outliers (Uso de union/unpacks)
     indices_flagados = set().union(
         outliers_biv.index,
         maha_out.index,
         *[idx for idx in outliers_uni.values()]
     )
 
-    # 4. Purificação dos dados
     df_sem_outliers = df.drop(index=indices_flagados, errors="ignore")
 
     return {
@@ -244,24 +227,18 @@ def preparar_contexto_hatco(df: pd.DataFrame) -> Dict[str, Any]:
 def detecta_celulas_em_branco(df: pd.DataFrame) -> List[str]:
     """Filtra as variáveis escalares (v1 a v9) que possuem dados ausentes."""
     escalares = [f"v{i}" for i in range(1, 10)]
-    # Retorna apenas as colunas da lista que existem no banco e têm nulos
     return [col for col in escalares if col in df.columns and df[col].isnull().any()]
 
 def preparar_contexto_hbat_missing(df: pd.DataFrame) -> Dict[str, Any]:
     """Analisa dados ausentes e aplica imputação pela média na base HBAT."""
     total_casos = len(df)
     
-    # 1. Análise de Missing (Aproveitamos operações vetorizadas do Pandas)
     contagem_ausentes = df.isnull().sum()
-    percentual_ausentes = (df.isnull().mean() * 100).round(2) # Mais direto que dividir manualmente
+    percentual_ausentes = (df.isnull().mean() * 100).round(2)
 
-    # 2. Filtro de regras específicas (Isolado em função externa para clareza)
     colunas_com_ausente = detecta_celulas_em_branco(df)
-
-    # 3. Substituição de células em branco pela média
     df_imputado = substituir_pela_media_hbat_missing(df, colunas_com_ausente)
 
-    # 4. Construção da tabela de resumo de forma pythônica
     tabela_missing = pd.DataFrame({
         "n_ausente": contagem_ausentes,
         "pct": percentual_ausentes,
@@ -282,9 +259,13 @@ def preparar_contexto_hbat_missing(df: pd.DataFrame) -> Dict[str, Any]:
 # ── Renderização com Jinja2 ───────────────────────────────────────────────────
 
 def gerar_relatorio():
-    """Função principal que gera o relatório completo."""
-    df_hatco = carregar_csv(ARQUIVO_HATCO)
-    df_hbat = carregar_csv(ARQUIVO_HBAT)
+    """Função principal que gera os gráficos e o relatório HTML."""
+    try:
+        df_hatco = carregar_csv(ARQUIVO_HATCO)
+        df_hbat = carregar_csv(ARQUIVO_HBAT)
+    except FileNotFoundError as e:
+        print(f"❌ Erro ao carregar os arquivos: {e}")
+        return
 
     ctx_hatco = preparar_contexto_hatco(df_hatco)
     ctx_hbat = preparar_contexto_hbat_missing(df_hbat)
@@ -295,28 +276,31 @@ def gerar_relatorio():
     gerar_qq_mahalanobis(ctx_hatco["maha"], ctx_hatco["colunas_maha"])
     gerar_grafico_missing(ctx_hbat["percentual_ausentes"])
 
-    # Preparação do contexto completo para o template
+    # Consolidação do dicionário de contexto para o Jinja2
     contexto = {
         "titulo": "Diagnóstico Multivariado de Dados — Padrão SPSS",
         "limiar_zscore": LIMIAR_ZSCORE,
         "limiar_pvalor": LIMIAR_PVALOR_CHI2,
         "data_geracao": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "df_hatco": df_hatco,
+        "df_hbat": df_hbat,
         **ctx_hatco,
         **ctx_hbat
     }
 
-    # Renderização com Jinja2
-    env = Environment(loader=FileSystemLoader('.'), autoescape=True)
-    template = env.get_template('template_relatorio.html')
-    contexto['df_hatco'] = df_hatco
-    contexto['df_hbat']  = df_hbat
-    html = template.render(contexto)
+    # Inicialização do ambiente Jinja2 e gravação da saída
+    try:
+        env = Environment(loader=FileSystemLoader('.'), autoescape=True)
+        template = env.get_template('template_relatorio.html')
+        html = template.render(contexto)
 
-    with open(ARQUIVO_HTML, "w", encoding="utf-8") as f:
-        f.write(html)
-
-    print(f"✅ Relatório gerado com sucesso: {ARQUIVO_HTML}")
-    print("Gráficos gerados: boxplot_spss.png, dispersao_spss.png, qqplot_spss.png, missing_spss.png")
+        with open(ARQUIVO_HTML, "w", encoding="utf-8") as f:
+            f.write(html)
+            
+        print(f"✅ Relatório gerado com sucesso: {ARQUIVO_HTML}")
+        print("Gráficos gerados: boxplot_spss.png, dispersao_spss.png, qqplot_spss.png, missing_spss.png")
+    except Exception as e:
+        print(f"❌ Erro durante a renderização do template HTML: {e}")
 
 if __name__ == "__main__":
     gerar_relatorio()
