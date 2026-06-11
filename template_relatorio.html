@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Relatório Estatístico — Outliers & Missing</title>
+    <style>
+        body { font-family: Arial, Helvetica, sans-serif; margin: 40px; line-height: 1.6; }
+        h1, h2, h3 { color: #1B365D; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+        th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: center; }
+        th { background-color: #f0f0f0; font-weight: bold; }
+        .alerta { color: #8B0000; font-weight: bold; }
+        img { max-width: 100%; height: auto; border: 1px solid #ddd; margin: 15px 0; }
+        hr { border: 1px solid #ddd; margin: 25px 0; }
+    </style>
+</head>
+<body>
+
+<h1>{{ titulo }}</h1>
+<p><em>Limiar Z-score: |z| &gt; {{ limiar_zscore }} &nbsp;&nbsp;|&nbsp;&nbsp; Mahalanobis p &lt; {{ limiar_pvalor }}</em></p>
+<p><small>Gerado em {{ data_geracao }}</small></p>
+<hr>
+
+<h2>BLOCO HATCO — Análise de Outliers</h2>
+
+<h3>1. Outliers Univariados</h3>
+<img src="boxplot_spss.png" alt="Boxplot">
+
+<table>
+    <thead><tr><th>Variável</th><th>Média</th><th>DP</th><th>N° Outliers</th></tr></thead>
+    <tbody>
+    {% for col in colunas_uni %}
+        <tr>
+            <td><strong>{{ col }}</strong></td>
+            <td>{{ df_hatco[col].mean() | round(4) if df_hatco is defined and col in df_hatco.columns else 'N/A' }}</td>
+            <td>{{ df_hatco[col].std() | round(4) if df_hatco is defined and col in df_hatco.columns else 'N/A' }}</td>
+            <td class="{% if outliers_uni[col]|length > 0 %}alerta{% endif %}">{{ outliers_uni[col]|length }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<h3>2. Outliers Bivariados</h3>
+<img src="dispersao_spss.png" alt="Dispersão">
+
+{% if outliers_biv is defined and not outliers_biv.empty %}
+<table>
+    <thead><tr><th>ID</th><th>{{ coluna_x }}</th><th>{{ coluna_y }}</th><th>Resíduo</th></tr></thead>
+    <tbody>
+    {% for idx, row in outliers_biv.iterrows() %}
+        <tr>
+            <td>{{ idx }}</td>
+            <td>{{ row[coluna_x]|round(4) }}</td>
+            <td>{{ row[coluna_y]|round(4) }}</td>
+            <td class="alerta">{{ row.residuo_padronizado|round(4) }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<h3>3. Outliers Multivariados — Mahalanobis (Q-Q Plot)</h3>
+<img src="qqplot_spss.png" alt="Q-Q Plot">
+
+<table>
+    <thead>
+        <tr><th>ID do Caso</th><th>D²</th><th>gl</th><th>p-valor</th><th>Outlier?</th></tr>
+    </thead>
+    <tbody>
+    {% for idx, row in maha.sort_values(by='D2', ascending=False).iterrows() %}
+        {% if row.D2 is not none and (row.outlier or row.D2 > 14) %}
+        <tr>
+            <td>{{ df_hatco.loc[idx, 'id'] | default(idx) }}</td>
+            <td>{{ row.D2 | round(4) }}</td>
+            <td>{{ row.gl }}</td>
+            <td>{{ row.pvalor | round(8) if row.pvalor is not none else 'N/A' }}</td>
+            <td class="{% if row.outlier %}alerta{% endif %}">{{ 'SIM ⚑' if row.outlier else 'não' }}</td>
+        </tr>
+        {% endif %}
+    {% endfor %}
+    </tbody>
+</table>
+
+<p><strong>Observação:</strong> Apenas os casos com p &lt; 0.001 foram marcados como outliers multivariados.</p>
+
+<h3>4. Comparação COM × SEM Outliers</h3>
+<p><strong>Original:</strong> {{ n_original }} casos | 
+   <strong>Removidos:</strong> {{ indices_flagados|length }} | 
+   <strong>Purificada:</strong> {{ n_purificado }} casos</p>
+
+<hr>
+
+<h2>BLOCO HBAT_MISSING — Dados Ausentes</h2>
+<img src="missing_spss.png" alt="Missing">
+
+<table>
+    <thead><tr><th>Variável</th><th>Ausentes</th><th>%</th><th>Válidos</th></tr></thead>
+    <tbody>
+    {% for _, row in tabela_missing.iterrows() %}
+        <tr>
+            <td>{{ row.variavel }}</td>
+            <td>{{ row.n_ausente }}</td>
+            <td>{{ row.pct }}%</td>
+            <td>{{ row.n_valido }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<hr>
+<p><small>Relatório gerado com Python + Jinja2</small></p>
+
+</body>
+</html>
